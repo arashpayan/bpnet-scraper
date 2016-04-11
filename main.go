@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"flag"
@@ -8,6 +9,8 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -27,7 +30,7 @@ func (l Language) obligatory() string {
 	case 1:
 		return "Obligatory"
 	case 3:
-		return ""
+		return "Pflichtgebet"
 	default:
 		log.Fatalf("No translation for 'Obligatory' found for %s", l.EnglishName)
 	}
@@ -51,7 +54,7 @@ func (l Language) occassional() string {
 	case 1:
 		return "Occassional"
 	case 3:
-		return ""
+		return "Gelegentlich"
 	default:
 		log.Fatalf("No translation for 'Occassional' found for %s", l.EnglishName)
 	}
@@ -90,6 +93,9 @@ type Prayer struct {
 	Tags         []Tag
 	Title        string
 	category     string
+	citation     string
+	htmlPrayer   string
+	openingWords string
 }
 
 func main() {
@@ -102,14 +108,14 @@ func main() {
 		log.Fatal("You need to specify a valid language id")
 	}
 
-	fmt.Printf("Looking up language...")
+	fmt.Printf("Looking up language…")
 	lang, err := lookUpLanguage(*langIDToScrape)
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf(" DONE!\n")
 
-	fmt.Printf("Retrieving prayers...")
+	fmt.Printf("Retrieving prayers…")
 	pr, err := prayersForLanguage(*langIDToScrape)
 	if err != nil {
 		log.Fatal(err)
@@ -118,24 +124,31 @@ func main() {
 
 	categorize(pr, *lang)
 
-	categories := make(map[string]int)
-	for _, p := range pr.Prayers {
-		count := categories[p.category]
-		count++
-		categories[p.category] = count
-	}
+	markup(pr)
 
-	for category, count := range categories {
-		fmt.Printf("%s: %d\n", category, count)
-	}
-
-	// err = populateDatabase(*pr, *lang)
-	// if err != nil {
-	// 	log.Fatal(err)
+	// categories := make(map[string]int)
+	// for _, p := range pr.Prayers {
+	// 	count := categories[p.category]
+	// 	count++
+	// 	categories[p.category] = count
 	// }
+	//
+	// for category, count := range categories {
+	// 	fmt.Printf("%s: %d\n", category, count)
+	// }
+
+	fmt.Printf("Populating database…")
+	err = populateDatabase(*pr, *lang)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf(" DONE!\n")
 }
 
 func populateDatabase(pr PrayersResponse, lang Language) error {
+	// delete any old database files that may be around
+	os.Remove(lang.ISOName + ".db")
+
 	db, err := sql.Open("sqlite3", lang.ISOName+".db")
 	if err != nil {
 		return err
@@ -154,12 +167,77 @@ func populateDatabase(pr PrayersResponse, lang Language) error {
 	}
 	defer tx.Rollback()
 
-	// for _, prayer := range pr.Prayers {
-	//     const insertSQL = `INSERT INTO prayers (id, category, prayerText, openingWords, citation, author, language)`
-	//     db.Exec(insertSQL, prayer.ID, prayer.Category, prayer.Text, )
-	// }
+	for _, prayer := range pr.Prayers {
+		const insertSQL = `INSERT INTO prayers (id, category, prayerText, openingWords, citation, author, language) VALUES (?, ?, ?, ?, ?, ?, ?)`
+		_, err = tx.Exec(insertSQL, prayer.ID, prayer.category, prayer.htmlPrayer, prayer.openingWords, prayer.citation, "l", lang.ISOName)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	return tx.Commit()
+}
+
+func markup(pr *PrayersResponse) {
+	for i := range pr.Prayers {
+		prayer := &pr.Prayers[i]
+		// if prayer.ID != 6664 {
+		// 	continue
+		// }
+
+		parts := strings.FieldsFunc(prayer.Text, func(r rune) bool {
+			return r == '\n'
+		})
+		var cleanedParts []string
+		for _, p := range parts {
+			trimmed := strings.TrimSpace(p)
+			if trimmed != "" {
+				cleanedParts = append(cleanedParts, trimmed)
+				// log.Print(trimmed)
+			}
+		}
+
+		var markedParts []string
+		markedOpening := false
+		for i, p := range cleanedParts {
+			if strings.HasPrefix(p, "##") {
+				markedParts = append(markedParts, `<p class="commentcaps">`+p[2:]+"</p>")
+			} else if strings.HasPrefix(p, "#") {
+				// log.Printf("Single hash")
+				// log.Printf("%d %s", prayer.ID, p)
+				prayer.openingWords = p[1:]
+			} else if strings.HasPrefix(p, "*") {
+				// if this is the last asterisk'ed paragraph, it's a citation
+				if i == len(cleanedParts)-1 {
+					prayer.citation = p[1:]
+					continue
+				}
+				markedParts = append(markedParts, `<p class="comment">`+p[1:]+"</p>")
+			} else {
+				if markedOpening {
+					markedParts = append(markedParts, "<p>"+p+"</p>")
+				} else {
+					min := 45
+					if len(p) < 45 {
+						min = len(p)
+					}
+					prayer.openingWords = p[:min] + "…"
+					marked := `<p class="opening"><span class="versal>"` + p[0:1] + `</span>` + p[1:] + "</p>"
+					markedParts = append(markedParts, marked)
+					markedOpening = true
+				}
+			}
+		}
+
+		htmlPrayer := bytes.Buffer{}
+		for i, p := range markedParts {
+			htmlPrayer.WriteString(p)
+			if i != len(markedParts)-1 {
+				htmlPrayer.WriteString("\n\n")
+			}
+		}
+		prayer.htmlPrayer = htmlPrayer.String()
+	}
 }
 
 func categorize(pr *PrayersResponse, lang Language) {
