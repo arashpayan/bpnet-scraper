@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -42,7 +43,7 @@ func (l Language) tablets() string {
 	case 1:
 		return "Tablets"
 	case 3:
-		return ""
+		return "Tafel"
 	default:
 		log.Fatalf("No translation for 'Tablets' found for %s", l.EnglishName)
 	}
@@ -98,25 +99,180 @@ type Prayer struct {
 	openingWords string
 }
 
+// PBPrayer is the format of prayers in the app database
+type PBPrayer struct {
+	ID           int    `db:"id"`
+	Category     string `db:"category"`
+	PrayerText   string `db:"prayerText"`
+	OpeningWords string `db:"openingWords"`
+	Citation     string `db:"citation"`
+	Author       string `db:"author"`
+	Language     string `db:"language"`
+	WordCount    int    `db:"wordCount"`
+	SearchText   string `db:"searchText"`
+}
+
+type authorIDMap map[int]string
+
+// var languageAuthorMap = make(map[string]authorIDMap)
+var languageAuthorMap = map[string]authorIDMap{
+	"en": map[int]string{ // English
+		1: "The Báb",
+		2: "Bahá'u'lláh",
+		3: "`Abdu'l-Bahá",
+	},
+	"es": map[int]string{ // Spanish
+		1: "El Báb",
+		2: "Bahá'u'lláh",
+		3: "`Abdu'l-Bahá",
+	},
+	"fr": map[int]string{ // French
+		1: "Le Bab",
+		2: "Bahá'u'lláh",
+		3: "`Abdu'l-Bahá",
+	},
+	"nl": map[int]string{ // Dutch
+		1: "de Báb",
+		2: "Bahá'u'lláh",
+		3: "`Abdu'l-Bahá",
+	},
+	"is": map[int]string{ // Icelandic
+		1: "Bábinn",
+		2: "Bahá’u’lláh",
+		3: "`Abdu'l-Bahá",
+	},
+	"fj": map[int]string{ // Fijian
+		1: "Na Báb",
+		2: "Bahá’u’lláh",
+		3: "`Abdu'l-Bahá",
+	},
+	"cs": map[int]string{ // Czech
+		1: "Báb",
+		2: "Bahá’u’lláh",
+		3: "`Abdu'l-Bahá",
+	},
+	"sk": map[int]string{ // Slovak
+		1: "Báb",
+		2: "Bahá’u’lláh",
+		3: "`Abdu'l-Bahá",
+	},
+}
+
 func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 
 	langIDToScrape := flag.Int("language", 0, "Language to scrape")
+	mergeDBsList := flag.String("merge", "", "Comma separated list of db files")
 	flag.Parse()
 
-	if *langIDToScrape < 1 {
-		log.Fatal("You need to specify a valid language id")
+	if *langIDToScrape >= 1 {
+		scrapeLanguage(*langIDToScrape)
+	} else if *mergeDBsList != "" {
+		mergeDBs(*mergeDBsList)
+	} else {
+		log.Fatal("You need to specify a command")
+	}
+}
+
+func mergeDBs(dbsCommaSeparated string) {
+	dbs := strings.Split(dbsCommaSeparated, ",")
+
+	// delete any old mergings
+	os.Remove("merged.db")
+
+	db, err := sql.Open("sqlite3", "merged.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	const createTableSQL = `
+	CREATE TABLE prayers (	id INTEGER PRIMARY KEY,
+							category TEXT NOT NULL,
+							prayerText TEXT NOT NULL,
+							openingWords TEXT NOT NULL,
+							citation TEXT NOT NULL,
+							author TEXT NOT NULL,
+							language TEXT NOT NULL,
+							wordCount INTEGER NOT NULL,
+							searchText TEXT NOT NULL)`
+
+	_, err = db.Exec(createTableSQL)
+	if err != nil {
+		log.Fatal(err)
 	}
 
+	for _, dbPath := range dbs {
+		mergeDB(dbPath, db)
+	}
+}
+
+func mergeDB(langDBPath string, mergedDB *sql.DB) {
+	langDB, err := sqlx.Open("sqlite3", langDBPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer langDB.Close()
+
+	rows, err := langDB.Queryx("SELECT * FROM prayers")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rows.Close()
+
+	tx, err := mergedDB.Begin()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	const insertSQL = `INSERT INTO prayers (id, category, prayerText, openingWords, citation, author, language, wordCount, searchText) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+	for rows.Next() {
+		prayer := PBPrayer{}
+		err = rows.StructScan(&prayer)
+		if err != nil {
+			log.Fatal(err)
+		}
+		searchText := strings.Replace(prayer.PrayerText, `<p>`, "", -1)
+		searchText = strings.Replace(searchText, `</p>`, "", -1)
+		searchText = strings.Replace(searchText, `<p class="opening">`, "", -1)
+		searchText = strings.Replace(searchText, `<span class="versal">`, "", -1)
+		searchText = strings.Replace(searchText, `</span>`, "", -1)
+		searchText = strings.Replace(searchText, `<p class="noindent">`, "", -1)
+		searchText = strings.Replace(searchText, `<br/>`, "", -1)
+		searchText = strings.Replace(searchText, `<i>`, "", -1)
+		searchText = strings.Replace(searchText, `</i>`, "", -1)
+		searchText = strings.Replace(searchText, `<p class="comment">`, "", -1)
+		searchText = strings.Replace(searchText, `<p class="commentcaps">`, "", -1)
+		searchText = strings.Replace(searchText, `<em>`, "", -1)
+		searchText = strings.Replace(searchText, `</em>`, "", -1)
+		prayer.WordCount = len(strings.Fields(searchText))
+
+		prayer.SearchText = searchText
+
+		_, err := tx.Exec(insertSQL, prayer.ID, prayer.Category, prayer.PrayerText, prayer.OpeningWords, prayer.Citation, prayer.Author, prayer.Language, prayer.WordCount, prayer.SearchText)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func scrapeLanguage(langIDToScrape int) {
 	fmt.Printf("Looking up language…")
-	lang, err := lookUpLanguage(*langIDToScrape)
+	lang, err := lookUpLanguage(langIDToScrape)
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf(" DONE!\n")
 
 	fmt.Printf("Retrieving prayers…")
-	pr, err := prayersForLanguage(*langIDToScrape)
+	pr, err := prayersForLanguage(langIDToScrape)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -169,7 +325,13 @@ func populateDatabase(pr PrayersResponse, lang Language) error {
 
 	for _, prayer := range pr.Prayers {
 		const insertSQL = `INSERT INTO prayers (id, category, prayerText, openingWords, citation, author, language) VALUES (?, ?, ?, ?, ?, ?, ?)`
-		_, err = tx.Exec(insertSQL, prayer.ID, prayer.category, prayer.htmlPrayer, prayer.openingWords, prayer.citation, "l", lang.ISOName)
+		openingWords := ""
+		if prayer.Title != "" {
+			openingWords = prayer.Title
+		} else {
+			openingWords = prayer.openingWords
+		}
+		_, err = tx.Exec(insertSQL, prayer.ID, prayer.category, prayer.htmlPrayer, openingWords, prayer.citation, languageAuthorMap[lang.ISOName][prayer.AuthorID], lang.ISOName)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -222,7 +384,7 @@ func markup(pr *PrayersResponse) {
 						min = len(p)
 					}
 					prayer.openingWords = p[:min] + "…"
-					marked := `<p class="opening"><span class="versal>"` + p[0:1] + `</span>` + p[1:] + "</p>"
+					marked := `<p class="opening"><span class="versal">` + p[0:1] + `</span>` + p[1:] + "</p>"
 					markedParts = append(markedParts, marked)
 					markedOpening = true
 				}
@@ -250,6 +412,7 @@ func categorize(pr *PrayersResponse, lang Language) {
 			prayer.category = tag.Name
 		case tagKindObligatory:
 			prayer.category = lang.obligatory()
+			prayer.Title = tag.Name
 		case tagKindOccassional:
 			prayer.category = lang.occassional()
 		case tagKindTablets:
