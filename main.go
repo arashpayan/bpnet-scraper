@@ -16,6 +16,25 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+// Language ids
+const (
+	English    int = 1
+	Icelandic      = 2
+	German         = 3
+	Spanish        = 4
+	Persian        = 5
+	Arabic         = 6
+	French         = 7
+	Portuguese     = 8
+	Chinese        = 9
+	Italian        = 10
+	Dutch          = 11
+	Romanian       = 12
+	Latvian        = 13
+	Belarusian     = 14
+	Russian        = 15
+)
+
 // Language ...
 type Language struct {
 	ID          int `json:"id"`
@@ -28,10 +47,12 @@ type Language struct {
 
 func (l Language) obligatory() string {
 	switch l.ID {
-	case 1:
+	case English:
 		return "Obligatory"
-	case 3:
+	case German:
 		return "Pflichtgebet"
+	case Russian:
+		return "Oбязательная" // TODO
 	default:
 		log.Fatalf("No translation for 'Obligatory' found for %s", l.EnglishName)
 	}
@@ -40,10 +61,12 @@ func (l Language) obligatory() string {
 
 func (l Language) tablets() string {
 	switch l.ID {
-	case 1:
+	case English:
 		return "Tablets"
-	case 3:
-		return "Tafel"
+	case German:
+		return "Tableten"
+	case Russian:
+		return "" // TODO
 	default:
 		log.Fatalf("No translation for 'Tablets' found for %s", l.EnglishName)
 	}
@@ -52,12 +75,24 @@ func (l Language) tablets() string {
 
 func (l Language) occassional() string {
 	switch l.ID {
-	case 1:
+	case English:
 		return "Occassional"
-	case 3:
-		return "Gelegentlich"
+	case German:
+		return "Besondere Gelegenheiten" // TODO
+	case Russian:
+		return "случайный" // TODO
 	default:
 		log.Fatalf("No translation for 'Occassional' found for %s", l.EnglishName)
+	}
+	return ""
+}
+
+func (l Language) theFast() string {
+	switch l.ID {
+	case English:
+		return "The Fast"
+	default:
+		log.Fatalf("No translation for 'The Fast' found for %s", l.EnglishName)
 	}
 	return ""
 }
@@ -156,6 +191,16 @@ var languageAuthorMap = map[string]authorIDMap{
 		2: "Bahá’u’lláh",
 		3: "`Abdu'l-Bahá",
 	},
+	"de": map[int]string{ // German
+		1: "Báb",
+		2: "Bahá’u’lláh",
+		3: "`Abdu'l-Bahá",
+	},
+	"ru": map[int]string{ // Russian
+		1: "Баб",
+		2: "Бахаулла",
+		3: "Абдул-Баха",
+	},
 }
 
 func main() {
@@ -202,9 +247,27 @@ func mergeDBs(dbsCommaSeparated string) {
 		log.Fatal(err)
 	}
 
+	fmt.Print("Merging")
 	for _, dbPath := range dbs {
+		fmt.Print(".")
 		mergeDB(dbPath, db)
 	}
+	fmt.Print(" DONE!\n")
+
+	fmt.Print("Creating indices... ")
+	_, err = db.Exec(`CREATE INDEX search_text_index ON prayers (searchText)`)
+	if err != nil {
+		log.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE INDEX language_index ON prayers (language)`)
+	if err != nil {
+		log.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE INDEX category_index on prayers (category)`)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Print("DONE!\n")
 }
 
 func mergeDB(langDBPath string, mergedDB *sql.DB) {
@@ -379,8 +442,8 @@ func markup(pr *PrayersResponse) {
 				if markedOpening {
 					markedParts = append(markedParts, "<p>"+p+"</p>")
 				} else {
-					min := 45
-					if len(p) < 45 {
+					min := 35
+					if len(p) < 35 {
 						min = len(p)
 					}
 					prayer.openingWords = p[:min] + "…"
@@ -415,6 +478,7 @@ func categorize(pr *PrayersResponse, lang Language) {
 			prayer.Title = tag.Name
 		case tagKindOccassional:
 			prayer.category = lang.occassional()
+			prayer.Title = tag.Name
 		case tagKindTablets:
 			prayer.category = lang.tablets()
 		default:
