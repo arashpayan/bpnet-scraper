@@ -33,6 +33,13 @@ const (
 	Latvian        = 13
 	Belarusian     = 14
 	Russian        = 15
+	Hungarian      = 16
+	Albanian       = 17
+	Czech          = 18
+	Japanese       = 19
+	Afrikaans      = 20
+	Korean         = 21
+	Bulgarian      = 22
 )
 
 // Language ...
@@ -51,6 +58,10 @@ func (l Language) obligatory() string {
 		return "Obligatory"
 	case German:
 		return "Pflichtgebet"
+	case Spanish:
+		return "Obligatoria"
+	case French:
+		return "Prescrites"
 	case Russian:
 		return "Oбязательная" // TODO
 	default:
@@ -65,6 +76,10 @@ func (l Language) tablets() string {
 		return "Tablets"
 	case German:
 		return "Tableten"
+	case Spanish:
+		return "Tablas"
+	case French:
+		return "Tablettes"
 	case Russian:
 		return "" // TODO
 	default:
@@ -78,7 +93,11 @@ func (l Language) occassional() string {
 	case English:
 		return "Occassional"
 	case German:
-		return "Besondere Gelegenheiten" // TODO
+		return "Besondere Gelegenheiten"
+	case Spanish:
+		return "Ocasional"
+	case French:
+		return "Occasionnel"
 	case Russian:
 		return "случайный" // TODO
 	default:
