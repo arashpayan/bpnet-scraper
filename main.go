@@ -60,6 +60,10 @@ func (l Language) obligatory() string {
 		return "Pflichtgebet"
 	case Spanish:
 		return "Obligatoria"
+	case Persian:
+		return "نماز"
+	case Arabic:
+		return "صلاة"
 	case French:
 		return "Prescrites"
 	case Russian:
@@ -78,6 +82,10 @@ func (l Language) tablets() string {
 		return "Tableten"
 	case Spanish:
 		return "Tablas"
+	case Persian:
+		return "الواح"
+	case Arabic:
+		return ""
 	case French:
 		return "Tablettes"
 	case Russian:
@@ -96,6 +104,10 @@ func (l Language) occassional() string {
 		return "Besondere Gelegenheiten"
 	case Spanish:
 		return "Ocasional"
+	case Persian:
+		return "مخصوص"
+	case Arabic:
+		return ""
 	case French:
 		return "Occasionnel"
 	case Russian:
@@ -220,6 +232,11 @@ var languageAuthorMap = map[string]authorIDMap{
 		2: "Бахаулла",
 		3: "Абдул-Баха",
 	},
+	"fa": map[int]string{ // Persian
+		1: "حضرت ربّ اعلی",
+		2: "حضرت بهاءالّله",
+		3: "حضرت عبدالبها",
+	},
 }
 
 func main() {
@@ -274,15 +291,15 @@ func mergeDBs(dbsCommaSeparated string) {
 	fmt.Print(" DONE!\n")
 
 	fmt.Print("Creating indices... ")
-	_, err = db.Exec(`CREATE INDEX search_text_index ON prayers (searchText)`)
-	if err != nil {
-		log.Fatal(err)
-	}
 	_, err = db.Exec(`CREATE INDEX language_index ON prayers (language)`)
 	if err != nil {
 		log.Fatal(err)
 	}
-	_, err = db.Exec(`CREATE INDEX category_index on prayers (category)`)
+	_, err = db.Exec(`CREATE INDEX category_language_index on prayers (category,language)`)
+	if err != nil {
+		log.Fatal(err)
+	}
+	_, err = db.Exec(`VACUUM`)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -362,7 +379,7 @@ func scrapeLanguage(langIDToScrape int) {
 
 	categorize(pr, *lang)
 
-	markup(pr)
+	markup(pr, *lang)
 
 	// categories := make(map[string]int)
 	// for _, p := range pr.Prayers {
@@ -422,22 +439,33 @@ func populateDatabase(pr PrayersResponse, lang Language) error {
 	return tx.Commit()
 }
 
-func markup(pr *PrayersResponse) {
+func markup(pr *PrayersResponse, lang Language) {
 	for i := range pr.Prayers {
 		prayer := &pr.Prayers[i]
+		if strings.HasPrefix(prayer.FirstTagName, lang.obligatory()) {
+			log.Printf("bad prayer tag: %d", prayer.ID)
+		}
 		// if prayer.ID != 6664 {
 		// 	continue
 		// }
+		if prayer.ID == 1420 {
+			log.Printf("hello 1420!")
+		}
 
 		parts := strings.FieldsFunc(prayer.Text, func(r rune) bool {
 			return r == '\n'
 		})
+		if prayer.ID == 1420 {
+			log.Printf("1420 has %d parts", len(parts))
+		}
 		var cleanedParts []string
 		for _, p := range parts {
 			trimmed := strings.TrimSpace(p)
 			if trimmed != "" {
 				cleanedParts = append(cleanedParts, trimmed)
-				// log.Print(trimmed)
+				if prayer.ID == 1420 {
+					log.Print(trimmed)
+				}
 			}
 		}
 
@@ -465,8 +493,20 @@ func markup(pr *PrayersResponse) {
 					if len(p) < 35 {
 						min = len(p)
 					}
-					prayer.openingWords = p[:min] + "…"
-					marked := `<p class="opening"><span class="versal">` + p[0:1] + `</span>` + p[1:] + "</p>"
+					if lang.LeftToRight {
+						prayer.openingWords = p[:min] + "…"
+					} else {
+						prayer.openingWords = p[:min]
+					}
+					if prayer.ID == 1420 {
+						log.Printf("min is %d and opening words are %v", min, prayer.openingWords)
+					}
+					var marked string
+					if lang.LeftToRight {
+						marked = `<p class="opening"><span class="versal">` + p[0:1] + `</span>` + p[1:] + "</p>"
+					} else {
+						marked = "<p>" + p + "</p>"
+					}
 					markedParts = append(markedParts, marked)
 					markedOpening = true
 				}
