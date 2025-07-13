@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -18,28 +18,29 @@ import (
 
 // Language ids
 const (
-	English    int = 1
-	Icelandic      = 2
-	German         = 3
-	Spanish        = 4
-	Persian        = 5
-	Arabic         = 6
-	French         = 7
-	Portuguese     = 8
-	Chinese        = 9
-	Italian        = 10
-	Dutch          = 11
-	Romanian       = 12
-	Latvian        = 13
-	Belarusian     = 14
-	Russian        = 15
-	Hungarian      = 16
-	Albanian       = 17
-	Czech          = 18
-	Japanese       = 19
-	Afrikaans      = 20
-	Korean         = 21
-	Bulgarian      = 22
+	English    = 1
+	Icelandic  = 2
+	German     = 3
+	Spanish    = 4
+	Persian    = 5
+	Arabic     = 6
+	French     = 7
+	Portuguese = 8
+	Chinese    = 9
+	Italian    = 10
+	Dutch      = 11
+	Romanian   = 12
+	Latvian    = 13
+	Belarusian = 14
+	Russian    = 15
+	Hungarian  = 16
+	Albanian   = 17
+	Czech      = 18
+	Japanese   = 19
+	Afrikaans  = 20
+	Korean     = 21
+	Bulgarian  = 22
+	Tamil      = 39
 )
 
 // Language ...
@@ -68,6 +69,8 @@ func (l Language) obligatory() string {
 		return "Prescrites"
 	case Russian:
 		return "Oбязательная" // TODO
+	case Tamil:
+		return "Obligatory" // TODO
 	default:
 		log.Fatalf("No translation for 'Obligatory' found for %s", l.EnglishName)
 	}
@@ -90,6 +93,8 @@ func (l Language) tablets() string {
 		return "Tablettes"
 	case Russian:
 		return "" // TODO
+	case Tamil:
+		return "Tablets" // TODO
 	default:
 		log.Fatalf("No translation for 'Tablets' found for %s", l.EnglishName)
 	}
@@ -112,6 +117,8 @@ func (l Language) occassional() string {
 		return "Occasionnel"
 	case Russian:
 		return "случайный" // TODO
+	case Tamil:
+		return "Occassional" // TODO
 	default:
 		log.Fatalf("No translation for 'Occassional' found for %s", l.EnglishName)
 	}
@@ -145,9 +152,9 @@ type Tag struct {
 
 const (
 	tagKindGeneral     string = "GENERAL"
-	tagKindOccassional        = "OCCASSIONAL"
-	tagKindTablets            = "TABLETS"
-	tagKindObligatory         = "OBLIGATORY"
+	tagKindOccassional string = "OCCASSIONAL"
+	tagKindTablets     string = "TABLETS"
+	tagKindObligatory  string = "OBLIGATORY"
 )
 
 // Prayer ...
@@ -204,27 +211,27 @@ var languageAuthorMap = map[string]authorIDMap{
 	},
 	"is": map[int]string{ // Icelandic
 		1: "Bábinn",
-		2: "Bahá’u’lláh",
+		2: "Bahá'u'lláh",
 		3: "`Abdu'l-Bahá",
 	},
 	"fj": map[int]string{ // Fijian
 		1: "Na Báb",
-		2: "Bahá’u’lláh",
+		2: "Bahá'u'lláh",
 		3: "`Abdu'l-Bahá",
 	},
 	"cs": map[int]string{ // Czech
 		1: "Báb",
-		2: "Bahá’u’lláh",
+		2: "Bahá'u'lláh",
 		3: "`Abdu'l-Bahá",
 	},
 	"sk": map[int]string{ // Slovak
 		1: "Báb",
-		2: "Bahá’u’lláh",
+		2: "Bahá'u'lláh",
 		3: "`Abdu'l-Bahá",
 	},
 	"de": map[int]string{ // German
 		1: "Báb",
-		2: "Bahá’u’lláh",
+		2: "Bahá'u'lláh",
 		3: "`Abdu'l-Bahá",
 	},
 	"ru": map[int]string{ // Russian
@@ -236,6 +243,11 @@ var languageAuthorMap = map[string]authorIDMap{
 		1: "حضرت ربّ اعلی",
 		2: "حضرت بهاءالّله",
 		3: "حضرت عبدالبها",
+	},
+	"ta": map[int]string{ // Tamil
+		1: "The Báb",
+		2: "Bahá'u'lláh",
+		3: "`Abdu'l-Bahá",
 	},
 }
 
@@ -340,6 +352,7 @@ func mergeDB(langDBPath string, mergedDB *sql.DB) {
 		searchText = strings.Replace(searchText, `</span>`, "", -1)
 		searchText = strings.Replace(searchText, `<p class="noindent">`, "", -1)
 		searchText = strings.Replace(searchText, `<br/>`, "", -1)
+		searchText = strings.Replace(searchText, `<br>`, "", -1)
 		searchText = strings.Replace(searchText, `<i>`, "", -1)
 		searchText = strings.Replace(searchText, `</i>`, "", -1)
 		searchText = strings.Replace(searchText, `<p class="comment">`, "", -1)
@@ -445,27 +458,15 @@ func markup(pr *PrayersResponse, lang Language) {
 		if strings.HasPrefix(prayer.FirstTagName, lang.obligatory()) {
 			log.Printf("bad prayer tag: %d", prayer.ID)
 		}
-		// if prayer.ID != 6664 {
-		// 	continue
-		// }
-		if prayer.ID == 1420 {
-			log.Printf("hello 1420!")
-		}
 
 		parts := strings.FieldsFunc(prayer.Text, func(r rune) bool {
 			return r == '\n'
 		})
-		if prayer.ID == 1420 {
-			log.Printf("1420 has %d parts", len(parts))
-		}
 		var cleanedParts []string
 		for _, p := range parts {
 			trimmed := strings.TrimSpace(p)
 			if trimmed != "" {
 				cleanedParts = append(cleanedParts, trimmed)
-				if prayer.ID == 1420 {
-					log.Print(trimmed)
-				}
 			}
 		}
 
@@ -503,7 +504,8 @@ func markup(pr *PrayersResponse, lang Language) {
 					}
 					var marked string
 					if lang.LeftToRight {
-						marked = `<p class="opening"><span class="versal">` + p[0:1] + `</span>` + p[1:] + "</p>"
+						// marked = `<p class="opening"><span class="versal">` + p[0:1] + `</span>` + p[1:] + "</p>"
+						marked = "<p>" + p + "</p>"
 					} else {
 						marked = "<p>" + p + "</p>"
 					}
@@ -556,7 +558,7 @@ func prayersForLanguage(id int) (*PrayersResponse, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("Error retrieving prayers. HTTP code %d", resp.StatusCode)
-		if buf, err := ioutil.ReadAll(resp.Body); err != nil {
+		if buf, err := io.ReadAll(resp.Body); err != nil {
 			log.Fatal(err)
 		} else {
 			log.Fatal(string(buf))
@@ -581,7 +583,7 @@ func lookUpLanguage(id int) (*Language, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		buf, err := ioutil.ReadAll(resp.Body)
+		buf, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("http code %d - %v", resp.StatusCode, err)
 		}
